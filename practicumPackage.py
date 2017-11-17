@@ -3,17 +3,28 @@ import threading
 from practicum import *
 
 # Define constant
+CONNECT_MCU = [True, False] # CHECK, BABE
 RQ_READ = 1
 RQ_SET_LOCK = 2
+RQ_GET_BUFFER_DATA = 9
+BUFFER_DATA_LENGTH = 8
 RQ_READ_LENGTH = 5
 POLLING_INTERVAL = 0.5
 UNLOCK_RFID_DATA = ([213, 8, 171, 137, 255], [125, 52, 171, 169, 75])
-# Global variable
+MCU_0_NAME = b'ID 5910500520'
+MCU_1_NAME = b'ID 5910500147'
+# Global variable  
 mcu_0 = None
+mcu_1 = None
 polling_data = None
 is_polling = True
 rfid_data = [0, 0, 0, 0, 0]
 lock_status = 1 # 0: Unlock, 1: lock
+lock_button = 1
+# Babe Board
+temp_data = None # Int
+humid_data = None # Int
+# LED and Air status
 
 def setup_usb():
     devs = findDevices()
@@ -21,12 +32,22 @@ def setup_usb():
         print('*** No Mcu found')
         exit(1)
     # Assign device to global
-    global mcu_0
-    mcu_0 = McuBoard(findDevices()[0])
-    # Report devices's name
-    print("Device manufacturer: %s" % (mcu_0.getVendorName()))
-    print("*** Device name: %s" % mcu_0.getDeviceName())
-
+    global mcu_0, mcu_1
+    tmp_mcus = []
+    for dev in devs:
+        mcu = McuBoard(dev)
+        if mcu.getDeviceName() == MCU_0_NAME:
+            mcu_0 = mcu
+        elif mcu.getDeviceName() == MCU_1_NAME:
+            mcu_1 = mcu
+    # Check require
+    if CONNECT_MCU[0] and mcu_0 == None:
+        print('Not found Check MCU')
+        exit(1)
+    if CONNECT_MCU[1] and mcu_1 == None:
+        print('Not found Babe MCU')
+        exit(1)
+ 
 def set_lock(val):
     # TODO: Function that set servo degree
     mcu_0.usbWrite(RQ_SET_LOCK, index=7, value=val)
@@ -49,13 +70,13 @@ def get_polling_data():
     return polling_data
 
 def polling_once():
-    data = mcu_0.usbRead(RQ_READ, length=RQ_READ_LENGTH)
+    data = mcu_0.usbRead(RQ_GET_BUFFER_DATA, length=BUFFER_DATA_LENGTH)
     # Managing data from MCU
     global polling_data
     polling_data = data
-    global rfid_data
-    rfid_data = [polling_data[0], polling_data[1], polling_data[2],
-                polling_data[3], polling_data[4]]
+    global rfid_data, lock_button
+    rfid_data = [polling_data[0], polling_data[1], polling_data[2], polling_data[3], polling_data[4]]
+    lock_button = polling_data[5]
 
 def polling_forever():
     while(is_polling):
@@ -72,11 +93,13 @@ class mcuThread(threading.Thread) :
 
     def process(self):
         if lock_status == 1:
-            print("Locking...")
             for each_rfid in UNLOCK_RFID_DATA:
                 if each_rfid == rfid_data:
                     set_lock(0)
                     break
+        else:
+            if lock_button == 0:
+                set_lock(1)
 
     def setup(self):
         set_lock(lock_status)
@@ -97,7 +120,10 @@ mcu_thread = mcuThread()
 
 if __name__ == "__main__":
     # Create thread for polling
-    mcu_thread.start()
+    if mcu_0 != None:
+        mcu_thread.start()
+    else:
+        exit(1)
     # Prompt
     while(True):
         # For error input, exit prompt
@@ -111,7 +137,7 @@ if __name__ == "__main__":
         elif val == 3:
             close_led()
         elif val == 1:
-            print(get_polling_data())
+            print(get_polling_data())   
         elif val == 2:
             set_lock(1)
         elif val == -1:

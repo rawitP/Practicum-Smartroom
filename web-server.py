@@ -20,6 +20,9 @@ class MyHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         self._set_headers()
+        if self.path == "/lock":
+            self.wfile.write(bytes("%s" % practicumPackage.lock_status,"utf-8"))
+            return
         self.wfile.write(b"<html><head><title>My Title</title></head>")
         self.wfile.write(bytes("<body><p>You accessed path: %s</p>" % self.path,"utf-8"))
         self.wfile.write(b"</body></html>")
