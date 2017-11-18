@@ -43,10 +43,24 @@ class CheckMCU():
         self.myRoom.set_lock_button(lock_button)
         self.myRoom.set_outside_button(outside_button)
         self.myRoom.set_inside_button(inside_button)
+
               
 
 class MyRoom(threading.Thread):
-    CONNECT_MCU = [True, False] # Check, Babe
+    Check_mcu = False
+    Babe_mcu = False
+    devs = findDevices()
+    for dev in devs:
+        mcu = McuBoard(dev)
+        if mcu.getDeviceName() == b'ID 5910500520' :
+            Check_mcu = True
+        if mcu.getDeviceName() == b'ID 5910500147' :
+            Babe_mcu = True
+        if Babe_mcu and Check_mcu :
+            break
+    print(Check_mcu)
+    print(Babe_mcu)
+    CONNECT_MCU = [Check_mcu, Babe_mcu]]
     POLLING_INTERVAL = 0.3
     UNLOCK_RFID_DATA = ([213, 8, 171, 137, 255], [125, 52, 171, 169, 75])
 
@@ -73,6 +87,9 @@ class MyRoom(threading.Thread):
     def mcu_list_setup(self):
         if self.CONNECT_MCU[0] == True:
             self.mcu_list.append(CheckMCU(self))
+        if self.CONNECT_MCU[1] == True:
+            self.mcu_list.append(BabeMCU(self))
+        
 
     def set_rfid_data(self, val):
         self.rfid_data = val
