@@ -116,9 +116,6 @@ def polling_once():
         pass
     #print(polling_data)
     # Managing data from MCU
-    '''
-    ssrk;l
-    '''
     global rfid_data, lock_button, outside_button, inside_button
     rfid_data = [polling_data[0], polling_data[1], polling_data[2],
                  polling_data[3], polling_data[4]]
@@ -162,7 +159,6 @@ class mcuThread(threading.Thread) :
 setup_usb()
 # Create polling thread
 mcu_thread = mcuThread()
-
 if __name__ == "__main__":
     # Create thread for polling
     if mcu_0 != None:
@@ -177,16 +173,17 @@ if __name__ == "__main__":
         except ValueError:
             break
         # Command
-        if val == 0:
-            open_led()
-        elif val == 3:
-            close_led()
-        elif val == 1:  
-            print(get_polling_data())
-        elif val == 2:
-            set_lock(1)
-        elif val == -1:
-            break
+        if CONNECT_MCU[0] == True:
+            if val == 0:
+                open_led()
+            elif val == 3:
+                close_led()
+            elif val == 1:  
+                print(get_polling_data())
+            elif val == 2:
+                set_lock(1)
+            elif val == -1:
+                break
     # Stop all thread before exit program
     mcu_thread.stop()
     mcu_thread.join()
