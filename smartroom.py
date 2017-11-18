@@ -31,7 +31,7 @@ class CheckMCU():
         try:
             self.polling_data = self.mcu.usbRead(CheckMCU.RQ_GET_BUFFER_DATA,
                                                  length=CheckMCU.BUFFER_DATA_LENGTH)
-        except usb.core.USBError as err: 
+        except usb.core.USBError as err:
             print("USBError: {0}".format(err))
             pass
         rfid_data = [self.polling_data[0], self.polling_data[1], self.polling_data[2],
@@ -43,10 +43,22 @@ class CheckMCU():
         self.myRoom.set_lock_button(lock_button)
         self.myRoom.set_outside_button(outside_button)
         self.myRoom.set_inside_button(inside_button)
-              
 
 class MyRoom(threading.Thread):
-    CONNECT_MCU = [True, False] # Check, Babe
+    Check_mcu = False
+    Babe_mcu = False
+    devs = findDevices()
+    for dev in devs:
+        mcu = McuBoard(dev)
+        if mcu.getDeviceName() == b'ID 5910500520':
+            Check_mcu = True
+        if mcu.getDeviceName() == b'ID 5910500147':
+            Babe_mcu = True
+        if Babe_mcu and Check_mcu:
+            break
+    print(Check_mcu)
+    print(Babe_mcu)
+    CONNECT_MCU = [Check_mcu, Babe_mcu]
     POLLING_INTERVAL = 0.3
     UNLOCK_RFID_DATA = ([213, 8, 171, 137, 255], [125, 52, 171, 169, 75])
 
@@ -73,6 +85,9 @@ class MyRoom(threading.Thread):
     def mcu_list_setup(self):
         if self.CONNECT_MCU[0] == True:
             self.mcu_list.append(CheckMCU(self))
+        if self.CONNECT_MCU[1] == True:
+            self.mcu_list.append(BabeMCU(self))
+
 
     def set_rfid_data(self, val):
         self.rfid_data = val
@@ -84,7 +99,7 @@ class MyRoom(threading.Thread):
             if mcu.__class__ == CheckMCU:
                 mcu.set_lock_servo(val)
                 break
-        print("* Lock status: %s" % MyRoom.LOCK_STATUS_MAP[val])        
+        print("* Lock status: %s" % MyRoom.LOCK_STATUS_MAP[val])
 
     def get_lock_status(self):
         return self.lock_status
@@ -94,7 +109,7 @@ class MyRoom(threading.Thread):
 
     def set_outside_button(self, val):
         self.outside_button = val
-    
+
     def set_inside_button(self, val):
         self.inside_button = val
 
@@ -145,7 +160,7 @@ class MyRoom(threading.Thread):
     def run(self):
         print("*** Start MyRoom Thread")
         self.setup()
-        while self.is_running :
+        while self.is_running:
             self.polling()
             self.process()
             sleep(MyRoom.POLLING_INTERVAL)
