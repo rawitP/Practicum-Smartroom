@@ -2,6 +2,74 @@ from time import sleep
 import threading
 from practicum import *
 
+# DEBUG CONFIG
+MONITOR_STATUS = False
+
+class BabeMCU():
+    MCU_NAME = b'ID 5910500147'
+    RQ_SET_LIGHT = 0
+    RQ_GET_TEMP = 1
+    RQ_GET_HUMID = 2
+    RQ_GET_LDR = 3
+    RQ_GET_SWITCH = 4
+    # Data length must be the same in MCU's firmware
+    TEMP_BYTE = 2
+    HUMID_BYTE = 2
+    LDR_BYTE = 2
+    SWITCH_BYTE = 4 
+
+    def __init__(self, myRoom):
+        self.myRoom = myRoom
+        self.mcu = None
+        devs = findDevices()
+        for dev in devs:
+            mcu = McuBoard(dev)
+            if mcu.getDeviceName() == BabeMCU.MCU_NAME:
+                self.mcu = mcu
+                break
+        if self.mcu == None:
+            print("*** Babe's MCU not found")
+            exit(1)
+        self.prev_switch_state = [0, 0, 0, 0]
+        self.cur_switch_state = [0, 0, 0, 0]
+
+    def set_light(self, light_index, val):
+        self.mcu.usbWrite(BabeMCU.RQ_SET_LIGHT, index=light_index, value=val)
+        pass
+
+    def set_air(self, val):
+        self.mcu.usbWrite(BabeMCU.RQ_SET_LIGHT, index=4, value=val)
+
+    def polling(self):
+        # !!! Very risky except !!!
+        # Use to prevent Input/Output error
+        try:
+            raw_temp_data = self.mcu.usbRead(BabeMCU.RQ_GET_TEMP,
+                                             length=BabeMCU.TEMP_BYTE)
+            self.myRoom.set_temp_data((raw_temp_data[1] * 256) + raw_temp_data[0])
+            raw_humid_data = self.mcu.usbRead(BabeMCU.RQ_GET_HUMID, 
+                                              length=BabeMCU.HUMID_BYTE)
+            self.myRoom.set_humid_data((raw_humid_data[1] * 256) + raw_humid_data[0])
+            raw_ldr_data = self.mcu.usbRead(BabeMCU.RQ_GET_LDR, 
+                                              length=BabeMCU.LDR_BYTE)
+            self.myRoom.set_ldr_data((raw_ldr_data[1] * 256) + raw_ldr_data[0])
+
+            # Polling switch state
+            raw_switch_data = self.mcu.usbRead(BabeMCU.RQ_GET_SWITCH,
+                                               length=BabeMCU.SWITCH_BYTE)
+            self.prev_switch_state = list(self.cur_switch_state)
+            self.cur_switch_state = [raw_switch_data[0], raw_switch_data[1],
+                                     raw_switch_data[2], raw_switch_data[3]]
+            switch_data = [] # Real data will be send to myRoom
+            for cur, prev in zip(self.prev_switch_state, self.cur_switch_state):
+                if cur != prev:
+                    switch_data.append(1)
+                else:
+                    switch_data.append(0)
+            self.myRoom.set_switch_state(switch_data)
+        except usb.core.USBError as err: 
+            print("USBError: {0}".format(err))
+
 class CheckMCU():
     MCU_NAME = b'ID 5910500520'
     RQ_SET_LOCK = 2
@@ -46,13 +114,17 @@ class CheckMCU():
               
 
 class MyRoom(threading.Thread):
-    CONNECT_MCU = [True, False] # Check, Babe
+    IS_MONITOR = MONITOR_STATUS
+    CONNECT_MCU = [True, False] # Please config before running
+                                # Check, Babe
     POLLING_INTERVAL = 0.3
     UNLOCK_RFID_DATA = ([213, 8, 171, 137, 255], [125, 52, 171, 169, 75])
 
     def __init__(self):
         threading.Thread.__init__(self)
         self.mcu_list = []
+        self.checkMCU = None
+        self.babeMCU = None
         self.mcu_list_setup()
         self.is_running = True
         self.rfid_data = [0, 0, 0, 0, 0]
@@ -67,23 +139,33 @@ class MyRoom(threading.Thread):
         self.outside_button = 1
         self.inside_button = 1
         self.counting_amount = 0
+        # Babe 
         self.temp_data = 0
         self.humid_data = 0
+        self.light_status = [0,0,0]
+        self.air_status = 0
+        self.ldr_data = 0
+        self.switch_state = [0, 0, 0, 0] # O: Not Press,
+                                         # 1: Press
 
     def mcu_list_setup(self):
         if self.CONNECT_MCU[0] == True:
-            self.mcu_list.append(CheckMCU(self))
+            self.checkMCU = CheckMCU(self)
+            self.mcu_list.append(self.checkMCU)
+        if self.CONNECT_MCU[1] == True:
+            # TODO: BabeMCU
+            self.babeMCU = BabeMCU(self)
+            self.mcu_list.append(self.babeMCU)
 
+    '''---------------------------- Check section ---------------------------'''
     def set_rfid_data(self, val):
         self.rfid_data = val
 
     LOCK_STATUS_MAP = {0: "Unlock", 1: "Lock"}
     def set_lock(self, val):
         self.lock_status = val
-        for mcu in self.mcu_list:
-            if mcu.__class__ == CheckMCU:
-                mcu.set_lock_servo(val)
-                break
+        if self.checkMCU != None:
+            self.checkMCU.set_lock_servo(val)
         print("* Lock status: %s" % MyRoom.LOCK_STATUS_MAP[val])        
 
     def get_lock_status(self):
@@ -123,12 +205,84 @@ class MyRoom(threading.Thread):
                 self.set_counting_state(3)
             elif self.counting_state == 0:
                 self.set_counting_state(2)
+                
+    '''----------------------------- Babe Section ---------------------------'''
+    LIGHT_STATUS_MAP = {0: 'OFF', 1: 'ON'}
+    def set_light(self, light_index, val):
+        self.light_status[light_index] = val
+        if self.babeMCU != None:
+            self.babeMCU.set_light(light_index, val)
+        print("* Light %d: %s" % (light_index, MyRoom.LIGHT_STATUS_MAP[val]))
 
+    def toggle_light(self, light_index):
+        val = 1
+        if self.light_status[light_index] == 1:
+            val = 0
+        self.set_light(light_index, val)
+
+    def get_light_status(self, light_index):
+        return self.light_status[light_index]
+
+    def set_temp_data(self, val):
+        self.temp_data = val
+
+    def get_temp(self):
+        return self.temp_data
+
+    def set_humid_data(self, val):
+        self.humid_data = val
+
+    def get_humid(self):
+        return self.humid_data
+
+    def set_ldr_data(self, val):
+        self.ldr_data = val
+
+    def get_ldr_data(self):
+        return self.ldr_data
+
+    def get_air_status(self):
+        return self.air_status
+
+    AIR_STATUS_MAP = {0: 'Off', 1: 'On'}
+    def set_air(self, val):
+        self.air_status = val
+        if self.babeMCU != None:
+            self.babeMCU.set_air(val)
+        print("* Air conditioner: %s" % MyRoom.AIR_STATUS_MAP[val])
+
+    def toggle_air(self):
+        val = 1
+        if self.air_status == 1:
+            val = 0
+        self.set_air(val)
+
+    def set_switch_state(self, val):
+        self.switch_state = list(val)
+
+    '''-------------------------- Process section ---------------------------'''
     def stop(self):
         self.is_running = False
 
     def setup(self):
         self.set_lock(self.lock_status)
+        self.set_air(self.air_status)
+        for light_index, status in enumerate(self.light_status):
+            self.set_light(light_index, status)
+
+    def monitor(self):
+        if not self.IS_MONITOR:
+            pass
+        print("**********************************")
+        print("* Switch state in myRoom: ", end='')
+        print(self.switch_state)
+        print("* Temperature: %d" % self.temp_data)
+        print("* Humid: %d" % self.humid_data)
+        print("* LDR value: %d" % self.ldr_data)
+        print("* Air conditioner: %s" % self.AIR_STATUS_MAP[self.air_status])
+        print("* Light relay: ", end='')
+        print(self.light_status)
+        print("**********************************")
 
     def process(self):
         if self.lock_status == 1:
@@ -141,12 +295,21 @@ class MyRoom(threading.Thread):
                 self.set_counting_state(0)
                 self.set_lock(1)
             self.counting_process()
+        if self.switch_state[0] == 1:
+            self.toggle_light(0)
+        if self.switch_state[1] == 1:
+            self.toggle_light(1)
+        if self.switch_state[2] == 1:
+            self.toggle_light(2)
+        if self.switch_state[3] == 1:
+            self.toggle_air()
 
     def run(self):
         print("*** Start MyRoom Thread")
         self.setup()
         while self.is_running :
             self.polling()
+            self.monitor() # For viewing variable value
             self.process()
             sleep(MyRoom.POLLING_INTERVAL)
         print("*** Stop MyRoom Thread")
@@ -155,12 +318,18 @@ class MyRoom(threading.Thread):
         for mcu in self.mcu_list:
             mcu.polling()
 
+'''------------------------------ Main Program ------------------------------'''
 if __name__ == "__main__":
     myRoom = MyRoom()
     myRoom.start()
     while True:
         try:
-            inp = int(input("Enter request: "))
+            inp = int(input())
+            if inp == 1:
+                myRoom.toggle_air()
+                myRoom.toggle_light(0)
+                myRoom.toggle_light(1)
+                myRoom.toggle_light(2)
             if inp == -1:
                 break
         except ValueError:
