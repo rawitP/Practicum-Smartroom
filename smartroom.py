@@ -13,11 +13,13 @@ class BabeMCU():
     RQ_GET_HUMID = 2
     RQ_GET_LDR = 3
     RQ_GET_SWITCH = 4
+    RQ_GET_BUFFER_DATA = 9
     # Data length must be the same in MCU's firmware
     TEMP_BYTE = 2
     HUMID_BYTE = 2
     LDR_BYTE = 2
     SWITCH_BYTE = 4
+    BUFFER_DATA_LENGTH = 8
 
     def __init__(self, myRoom):
         self.myRoom = myRoom
@@ -38,22 +40,34 @@ class BabeMCU():
         self.mcu.usbWrite(BabeMCU.RQ_SET_LIGHT, index=light_index, value=val)
 
     def set_air(self, val):
-        self.mcu.usbWrite(BabeMCU.RQ_SET_LIGHT, index=4, value=val)
+        self.mcu.usbWrite(BabeMCU.RQ_SET_LIGHT, index=3, value=val)
 
     def polling(self):
         # !!! Very risky except !!!
         # Use to prevent Input/Output error
-        try:
+        #try:
+            raw_data = self.mcu.usbRead(BabeMCU.RQ_GET_BUFFER_DATA,
+                                        length=BabeMCU.BUFFER_DATA_LENGTH)
+            #print(raw_data)
+            self.myRoom.set_temp_data(raw_data[4])
+            self.myRoom.set_humid_data(raw_data[6])
+            self.prev_switch_state = list(self.cur_switch_state)
+            self.cur_switch_state = [raw_data[0], raw_data[1],
+                                     raw_data[2], raw_data[3]]
+            switch_data = [] # Real data will be send to myRoom
+            for cur, prev in zip(self.prev_switch_state, self.cur_switch_state):
+                if cur != prev:
+                    switch_data.append(1)
+                else:
+                    switch_data.append(0)
+            self.myRoom.set_switch_state(switch_data)
+            '''
             raw_temp_data = self.mcu.usbRead(BabeMCU.RQ_GET_TEMP,
                                              length=BabeMCU.TEMP_BYTE)
             self.myRoom.set_temp_data((raw_temp_data[1] * 256) + raw_temp_data[0])
             raw_humid_data = self.mcu.usbRead(BabeMCU.RQ_GET_HUMID,
                                               length=BabeMCU.HUMID_BYTE)
             self.myRoom.set_humid_data((raw_humid_data[1] * 256) + raw_humid_data[0])
-            raw_ldr_data = self.mcu.usbRead(BabeMCU.RQ_GET_LDR,
-                                            length=BabeMCU.LDR_BYTE)
-            self.myRoom.set_ldr_data((raw_ldr_data[1] * 256) + raw_ldr_data[0])
-
             # Polling switch state
             raw_switch_data = self.mcu.usbRead(BabeMCU.RQ_GET_SWITCH,
                                                length=BabeMCU.SWITCH_BYTE)
@@ -67,8 +81,9 @@ class BabeMCU():
                 else:
                     switch_data.append(0)
             self.myRoom.set_switch_state(switch_data)
-        except usb.core.USBError as err:
-            print("USBError: {0}".format(err))
+            '''
+        #except usb.core.USBError as err:
+        #    print("USBError: {0}".format(err))
 
 
 class CheckMCU():
@@ -118,9 +133,9 @@ class CheckMCU():
 class MyRoom(threading.Thread):
 
     IS_MONITOR = MONITOR_STATUS
-    CONNECT_MCU = [False, False] # Please config before running
+    CONNECT_MCU = [True, True] # Please config before running
                                 # Check, Babe
-    POLLING_INTERVAL = 0.3
+    POLLING_INTERVAL = 0.5
     UNLOCK_RFID_DATA = ([213, 8, 171, 137, 255], [125, 52, 171, 169, 75])
 
     def __init__(self):
